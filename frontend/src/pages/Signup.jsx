@@ -1,18 +1,29 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Loader2, Mail, ArrowLeft, RefreshCw, MapPin } from "lucide-react";
+import {
+  Loader2,
+  Mail,
+  ArrowLeft,
+  RefreshCw,
+  MapPin,
+  Eye,
+  EyeOff,
+} from "lucide-react";
 import { GoogleLogin } from "@react-oauth/google";
 
 import AuthLayout from "../layouts/AuthLayout";
 import useApiMutation from "../hooks/useApiMutation";
 import { ENDPOINTS } from "../api/endpoints";
 import { getLiveLocation, getCachedCity } from "../utils/location";
+import { ALL_PAKISTANI_CITIES } from "../utils/cities";
 import GoogleOtpModal from "../components/GoogleOtpModal";
 
 const Signup = () => {
   const navigate = useNavigate();
 
   const [step, setStep] = useState("form"); // 'form' | 'otp'
+
+  // Form data
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -20,14 +31,19 @@ const Signup = () => {
     phone: "",
     city: getCachedCity() || "Karachi",
   });
+  const [showPassword, setShowPassword] = useState(false);
+
+  // OTP state
   const [otp, setOtp] = useState("");
   const [resendCooldown, setResendCooldown] = useState(0);
   const [feedbackMessage, setFeedbackMessage] = useState("");
+
+  // Location state
   const [isDetectingLocation, setIsDetectingLocation] = useState(false);
   const [locationStatus, setLocationStatus] = useState("");
 
   // Google auth state
-  const [googleEmail, setGoogleEmail] = useState(null); // non-null = show OTP modal
+  const [googleEmail, setGoogleEmail] = useState(null);
 
   // Auto-detect location on mount
   useEffect(() => {
@@ -39,9 +55,7 @@ const Signup = () => {
           setLocationStatus(res.locality ? `${res.locality}, ${res.city}` : res.city);
         }
       })
-      .finally(() => {
-        setIsDetectingLocation(false);
-      });
+      .finally(() => setIsDetectingLocation(false));
   }, []);
 
   // Resend cooldown timer
@@ -53,7 +67,19 @@ const Signup = () => {
     return () => clearInterval(timer);
   }, [resendCooldown]);
 
-  // 1. Submit Registration Form -> Sends OTP
+  const handleAuthSuccess = (data) => {
+    const token = data?.token || data?.data?.token || data?.accessToken;
+    if (token) localStorage.setItem("token", token);
+    if (data?.user) localStorage.setItem("user", JSON.stringify(data.user));
+
+    if (data?.user?.role === "admin") {
+      navigate("/admin/ads");
+    } else {
+      navigate("/dashboard");
+    }
+  };
+
+  // ── Step 1: Submit form → send OTP to email
   const sendOtpMutation = useApiMutation(ENDPOINTS.AUTH.SIGNUP_SEND_OTP, "POST", {
     onSuccess: (data) => {
       setStep("otp");
@@ -62,30 +88,12 @@ const Signup = () => {
     },
   });
 
-  // 2. Verify OTP -> Creates User & Logs In
-  const verifyOtpMutation = useApiMutation(
-    ENDPOINTS.AUTH.SIGNUP_VERIFY_OTP,
-    "POST",
-    {
-      onSuccess: (data) => {
-        const token = data?.token || data?.data?.token;
-        if (token) {
-          localStorage.setItem("token", token);
-        }
-        if (data?.user) {
-          localStorage.setItem("user", JSON.stringify(data.user));
-        }
+  // ── Step 2: Verify OTP → create account & login
+  const verifyOtpMutation = useApiMutation(ENDPOINTS.AUTH.SIGNUP_VERIFY_OTP, "POST", {
+    onSuccess: (data) => handleAuthSuccess(data),
+  });
 
-        if (data?.user?.role === "admin") {
-          navigate("/admin/ads");
-        } else {
-          navigate("/dashboard");
-        }
-      },
-    },
-  );
-
-  // 3. Resend OTP
+  // ── Resend OTP
   const resendMutation = useApiMutation(ENDPOINTS.AUTH.RESEND_OTP, "POST", {
     onSuccess: (data) => {
       setResendCooldown(60);
@@ -93,25 +101,23 @@ const Signup = () => {
     },
   });
 
-  // 4. Google Auth — sends ID token to backend, gets OTP dispatched
+  // ── Google Auth
   const googleAuthMutation = useApiMutation(ENDPOINTS.AUTH.GOOGLE_AUTH, "POST", {
     onSuccess: (data) => {
       if (data?.requireOtp) {
         setGoogleEmail(data.email);
+      } else {
+        handleAuthSuccess(data);
       }
     },
   });
 
-  // Called by <GoogleLogin> component with the credential (ID token)
   const handleGoogleCredential = ({ credential }) => {
     googleAuthMutation.mutate({ credential });
   };
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+    setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   const handleFormSubmit = (e) => {
@@ -123,19 +129,13 @@ const Signup = () => {
   const handleOtpSubmit = (e) => {
     e.preventDefault();
     setFeedbackMessage("");
-    verifyOtpMutation.mutate({
-      email: formData.email,
-      otp: otp.trim(),
-    });
+    verifyOtpMutation.mutate({ email: formData.email, otp: otp.trim() });
   };
 
   const handleResendOtp = () => {
     if (resendCooldown > 0 || resendMutation.isPending) return;
     setFeedbackMessage("");
-    resendMutation.mutate({
-      email: formData.email,
-      type: "signup",
-    });
+    resendMutation.mutate({ email: formData.email, type: "signup" });
   };
 
   const handleDetectCity = async () => {
@@ -158,14 +158,16 @@ const Signup = () => {
     <AuthLayout>
       {step === "form" ? (
         <>
-          <div className="mb-8">
+          <div className="mb-6">
             <h2 className="text-3xl font-bold text-white">Create account</h2>
             <p className="mt-2 text-slate-400">
               Enter your details to receive an activation OTP on your Gmail.
             </p>
           </div>
 
+          {/* ── Signup Form ── */}
           <form onSubmit={handleFormSubmit} className="space-y-5">
+            {/* Full Name */}
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-300">
                 Full Name
@@ -175,69 +177,80 @@ const Signup = () => {
                 name="name"
                 value={formData.name}
                 onChange={handleChange}
-                placeholder="Your name"
+                placeholder="e.g. Muhammad Ali"
                 required
                 className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
               />
             </div>
 
+            {/* Email */}
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-300">
                 Email
               </label>
-              <input
-                type="email"
-                name="email"
-                value={formData.email}
-                onChange={handleChange}
-                placeholder="you@example.com"
-                required
-                className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
-              />
+              <div className="relative">
+                <Mail
+                  size={16}
+                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  type="email"
+                  name="email"
+                  value={formData.email}
+                  onChange={handleChange}
+                  placeholder="you@example.com"
+                  required
+                  className="w-full rounded-xl border border-slate-700 bg-slate-900 py-3 pl-10 pr-4 text-white outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
+                />
+              </div>
             </div>
 
+            {/* Phone (optional, for ad listings) */}
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-300">
-                Phone
+                Phone Number{" "}
+                <span className="text-xs text-slate-500">(Optional — shown on your ads)</span>
               </label>
               <input
                 type="tel"
                 name="phone"
                 value={formData.phone}
                 onChange={handleChange}
-                placeholder="+92334317144"
-                required
+                placeholder="0300 1234567"
                 className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
               />
             </div>
 
+            {/* City */}
             <div>
               <div className="mb-2 flex items-center justify-between">
-                <label className="block text-sm font-medium text-slate-300">
-                  City
-                </label>
+                <label className="block text-sm font-medium text-slate-300">City</label>
                 <button
                   type="button"
                   onClick={handleDetectCity}
                   disabled={isDetectingLocation}
                   className="flex items-center gap-1.5 text-xs font-semibold text-violet-400 transition hover:text-violet-300 disabled:opacity-50"
-                  title="Detect live location from GPS or network"
                 >
                   <MapPin size={13} className={isDetectingLocation ? "animate-bounce" : ""} />
-                  {isDetectingLocation ? "Detecting location..." : "📍 Detect Live Location"}
+                  {isDetectingLocation ? "Detecting..." : "📍 Detect Live Location"}
                 </button>
               </div>
-
               <div className="relative">
                 <input
                   type="text"
                   name="city"
+                  list="pakistan-cities"
                   value={formData.city}
                   onChange={handleChange}
                   placeholder="e.g. Karachi, Lahore, Islamabad"
                   required
                   className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 pr-10 text-white outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
                 />
+                <datalist id="pakistan-cities">
+                  {ALL_PAKISTANI_CITIES.map((c) => (
+                    <option key={c} value={c} />
+                  ))}
+                </datalist>
                 <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500">
                   <MapPin size={16} />
                 </div>
@@ -249,28 +262,40 @@ const Signup = () => {
               )}
             </div>
 
+            {/* Password */}
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-300">
                 Password
               </label>
-              <input
-                type="password"
-                name="password"
-                value={formData.password}
-                onChange={handleChange}
-                placeholder="••••••••"
-                required
-                minLength={6}
-                className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  name="password"
+                  value={formData.password}
+                  onChange={handleChange}
+                  placeholder="••••••••"
+                  required
+                  minLength={6}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 pr-12 text-white outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                >
+                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                </button>
+              </div>
             </div>
 
+            {/* Error */}
             {sendOtpMutation.isError && (
               <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
-                {sendOtpMutation.error?.response?.data?.message || "Signup failed."}
+                {sendOtpMutation.error?.response?.data?.message || "Signup failed. Please try again."}
               </div>
             )}
 
+            {/* Submit */}
             <button
               type="submit"
               disabled={sendOtpMutation.isPending}
@@ -301,14 +326,18 @@ const Signup = () => {
             <div className="h-px flex-1 bg-slate-800" />
           </div>
 
-          {/* ── Google Sign-Up button ── */}
+          {/* ── Google Sign-Up ── */}
           {googleAuthMutation.isError && (
             <div className="mb-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
               {googleAuthMutation.error?.response?.data?.message ||
                 "Google sign-in failed. Please try again."}
             </div>
           )}
-          <div className={`flex justify-center ${googleAuthMutation.isPending ? "pointer-events-none opacity-60" : ""}`}>
+          <div
+            className={`flex justify-center ${
+              googleAuthMutation.isPending ? "pointer-events-none opacity-60" : ""
+            }`}
+          >
             <GoogleLogin
               onSuccess={handleGoogleCredential}
               onError={() => {}}
@@ -327,14 +356,19 @@ const Signup = () => {
           )}
         </>
       ) : (
-        /* OTP Verification Step */
+        /* ── OTP Verification Step ── */
         <>
           <button
             type="button"
-            onClick={() => setStep("form")}
+            onClick={() => {
+              setStep("form");
+              setOtp("");
+              setFeedbackMessage("");
+            }}
             className="mb-6 flex items-center gap-2 text-sm font-medium text-violet-400 hover:text-violet-300"
           >
-            <ArrowLeft size={16} /> Back to registration details
+            <ArrowLeft size={16} />
+            Back to registration
           </button>
 
           <div className="mb-8">
@@ -404,7 +438,7 @@ const Signup = () => {
           </form>
 
           <div className="mt-6 flex items-center justify-between border-t border-slate-800 pt-5 text-sm">
-            <span className="text-slate-400">Didn't receive the code?</span>
+            <span className="text-slate-400">Didn&apos;t receive the code?</span>
             <button
               type="button"
               onClick={handleResendOtp}
@@ -421,24 +455,14 @@ const Signup = () => {
           </div>
         </>
       )}
+
       {/* ── Google OTP Modal ── */}
       {googleEmail && (
         <GoogleOtpModal
           email={googleEmail}
           onSuccess={(data) => {
             setGoogleEmail(null);
-            const token = data?.token || data?.data?.token;
-            if (token) {
-              localStorage.setItem("token", token);
-            }
-            if (data?.user) {
-              localStorage.setItem("user", JSON.stringify(data.user));
-            }
-            if (data?.user?.role === "admin") {
-              navigate("/admin/ads");
-            } else {
-              navigate("/dashboard");
-            }
+            handleAuthSuccess(data);
           }}
           onClose={() => setGoogleEmail(null)}
         />

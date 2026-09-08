@@ -12,20 +12,23 @@ import { isTokenValid } from "../utils/auth";
 
 /* ─── Category data ─────────────────────────────────────────────── */
 const CATEGORIES = [
-  { icon: "📱", label: "Mobiles",      bg: "from-pink-50 to-rose-100",    border: "border-rose-200",    text: "text-rose-600" },
-  { icon: "🚗", label: "Vehicles",     bg: "from-blue-50 to-sky-100",     border: "border-sky-200",     text: "text-sky-600" },
-  { icon: "💻", label: "Electronics",  bg: "from-violet-50 to-indigo-100",border: "border-indigo-200",  text: "text-indigo-600" },
-  { icon: "🏠", label: "Home & Living",bg: "from-amber-50 to-yellow-100", border: "border-yellow-200",  text: "text-amber-600" },
-  { icon: "👕", label: "Fashion",      bg: "from-fuchsia-50 to-pink-100", border: "border-pink-200",    text: "text-fuchsia-600" },
-  { icon: "⚽", label: "Sports",       bg: "from-green-50 to-emerald-100",border: "border-emerald-200", text: "text-emerald-600" },
-  { icon: "📚", label: "Books",        bg: "from-orange-50 to-amber-100", border: "border-amber-200",   text: "text-orange-600" },
-  { icon: "🧸", label: "Kids & Baby",  bg: "from-cyan-50 to-teal-100",    border: "border-teal-200",    text: "text-teal-600" },
+  { icon: "📱", label: "Mobiles",                  bg: "from-rose-50 to-pink-100",     border: "border-pink-200",    text: "text-rose-600" },
+  { icon: "🚗", label: "Vehicles",                 bg: "from-blue-50 to-sky-100",      border: "border-sky-200",     text: "text-sky-600" },
+  { icon: "🏢", label: "Property for Sale",        bg: "from-amber-50 to-orange-100",  border: "border-orange-200",  text: "text-amber-700" },
+  { icon: "🏠", label: "Property for Rent",        bg: "from-yellow-50 to-amber-100",  border: "border-yellow-200",  text: "text-yellow-700" },
+  { icon: "💻", label: "Electronics & Appliances", bg: "from-violet-50 to-indigo-100", border: "border-indigo-200",  text: "text-indigo-600" },
+  { icon: "🏍️", label: "Bikes & Motorcycles",      bg: "from-red-50 to-rose-100",      border: "border-red-200",     text: "text-red-600" },
+  { icon: "🚜", label: "Business & Agriculture",   bg: "from-emerald-50 to-teal-100",  border: "border-emerald-200", text: "text-emerald-700" },
+  { icon: "🛠️", label: "Services",                 bg: "from-cyan-50 to-blue-100",     border: "border-cyan-200",    text: "text-cyan-700" },
+  { icon: "💼", label: "Jobs",                     bg: "from-purple-50 to-fuchsia-100",border: "border-purple-200",  text: "text-purple-700" },
+  { icon: "🐾", label: "Animals & Pets",           bg: "from-lime-50 to-green-100",    border: "border-lime-200",    text: "text-lime-700" },
+  { icon: "🛋️", label: "Furniture & Decor",        bg: "from-stone-50 to-amber-100",   border: "border-stone-200",   text: "text-stone-700" },
+  { icon: "👗", label: "Fashion & Beauty",         bg: "from-fuchsia-50 to-pink-100",  border: "border-pink-200",    text: "text-fuchsia-600" },
+  { icon: "📚", label: "Books & Sports",           bg: "from-teal-50 to-emerald-100",  border: "border-teal-200",    text: "text-teal-700" },
+  { icon: "🧸", label: "Kids & Baby",              bg: "from-sky-50 to-cyan-100",      border: "border-sky-200",     text: "text-sky-700" },
 ];
 
-const CITIES = [
-  "All Cities", "Karachi", "Lahore", "Islamabad", "Rawalpindi",
-  "Faisalabad", "Multan", "Peshawar", "Quetta", "Sialkot",
-];
+import { POPULAR_CITIES, PROVINCE_CITIES } from "../utils/cities";
 
 const HOW_IT_WORKS = [
   {
@@ -133,9 +136,21 @@ const Home = () => {
               <select
                 value={selectedCity}
                 onChange={(e) => setSelectedCity(e.target.value)}
-                className="h-full appearance-none bg-transparent py-4 pl-8 pr-7 text-sm font-medium text-slate-700 outline-none"
+                className="h-full max-w-[160px] appearance-none bg-transparent py-4 pl-8 pr-7 text-sm font-semibold text-slate-700 outline-none truncate cursor-pointer"
               >
-                {CITIES.map((c) => <option key={c}>{c}</option>)}
+                <option value="All Cities">🇵🇰 All Pakistan (All Cities)</option>
+                <optgroup label="⭐ Popular Cities">
+                  {POPULAR_CITIES.map((c) => (
+                    <option key={`home-pop-${c}`} value={c}>{c}</option>
+                  ))}
+                </optgroup>
+                {Object.entries(PROVINCE_CITIES).map(([province, cities]) => (
+                  <optgroup key={`home-${province}`} label={`📍 ${province}`}>
+                    {cities.map((c) => (
+                      <option key={`home-${province}-${c}`} value={c}>{c}</option>
+                    ))}
+                  </optgroup>
+                ))}
               </select>
               <ChevronDown size={13} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
             </div>
@@ -189,17 +204,17 @@ const Home = () => {
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-8">
+        <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7">
           {CATEGORIES.map(({ icon, label, bg, border, text }) => (
             <button
               key={label}
               onClick={() => handleCategoryClick(label)}
-              className={`group flex flex-col items-center gap-3 rounded-2xl border bg-gradient-to-b p-4 text-center transition-all hover:-translate-y-1 hover:shadow-lg ${bg} ${border} ${
-                activeCategory === label ? "ring-2 ring-violet-400 ring-offset-2" : ""
+              className={`group flex flex-col items-center justify-center gap-2.5 rounded-2xl border bg-gradient-to-b p-3.5 text-center transition-all hover:-translate-y-1 hover:shadow-lg ${bg} ${border} ${
+                activeCategory === label ? "ring-2 ring-violet-500 ring-offset-2" : ""
               }`}
             >
-              <div className="text-3xl transition-transform group-hover:scale-110">{icon}</div>
-              <span className={`text-[11px] font-bold leading-tight ${text}`}>{label}</span>
+              <div className="text-3xl transition-transform duration-200 group-hover:scale-110">{icon}</div>
+              <span className={`text-xs font-bold leading-tight ${text}`}>{label}</span>
             </button>
           ))}
         </div>

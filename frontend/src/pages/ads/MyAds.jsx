@@ -1,11 +1,12 @@
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Trash2, Edit3, Eye, Package, CheckCircle2, ShoppingBag } from "lucide-react";
+import { Trash2, Edit3, Eye, Package, CheckCircle2, ShoppingBag, Tag, Eye as EyeIcon } from "lucide-react";
 import AdCard from "../../components/ads/AdCard";
 import DashboardLayout from "../../layouts/DashboardLayout";
 import { ENDPOINTS } from "../../api/endpoints";
 import useApiQuery from "../../hooks/useApiQuery";
 import adService from "../../services/adService";
+import api from "../../api/axios";
 
 const MyAds = () => {
   const queryClient = useQueryClient();
@@ -22,9 +23,22 @@ const MyAds = () => {
     },
   });
 
+  const markSoldMutation = useMutation({
+    mutationFn: (adId) => api.patch(ENDPOINTS.ADS.MARK_SOLD(adId)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["my-ads"] });
+    },
+  });
+
   const handleDelete = (adId, title) => {
     if (window.confirm(`Are you sure you want to delete "${title}"? This will also remove all photos permanently.`)) {
       deleteMutation.mutate(adId);
+    }
+  };
+
+  const handleMarkSold = (adId, title) => {
+    if (window.confirm(`Mark "${title}" as SOLD? It will show the SOLD badge to buyers.`)) {
+      markSoldMutation.mutate(adId);
     }
   };
 
@@ -67,7 +81,7 @@ const MyAds = () => {
         </div>
 
         {/* Stats */}
-        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-100 text-violet-600">
               <Package size={24} />
@@ -98,6 +112,18 @@ const MyAds = () => {
               <p className="text-sm font-medium text-slate-500">Pending Approval</p>
               <p className="text-2xl font-bold text-amber-600">
                 {ads.filter((ad) => ad.status === "pending").length}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-sky-100 text-sky-600">
+              <Tag size={24} />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-slate-500">Sold Items</p>
+              <p className="text-2xl font-bold text-sky-600">
+                {ads.filter((ad) => ad.status === "sold").length}
               </p>
             </div>
           </div>
@@ -132,6 +158,8 @@ const MyAds = () => {
                     className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider ${
                       ad.status === "active"
                         ? "bg-emerald-100 text-emerald-800"
+                        : ad.status === "sold"
+                        ? "bg-sky-100 text-sky-800"
                         : ad.status === "pending"
                         ? "bg-amber-100 text-amber-800"
                         : ad.status === "rejected"
@@ -143,14 +171,36 @@ const MyAds = () => {
                   </span>
                 </div>
 
+                {/* Views Counter (if available) */}
+                {typeof ad.views === "number" && (
+                  <div className="flex items-center gap-1.5 px-4 py-1.5 text-xs text-slate-500 bg-slate-50/80 border-t border-slate-100">
+                    <EyeIcon size={13} className="text-slate-400" />
+                    <span>{ad.views} {ad.views === 1 ? "view" : "views"}</span>
+                  </div>
+                )}
+
                 {/* Card Action Buttons */}
-                <div className="flex border-t border-slate-100 bg-slate-50/50 p-2.5 gap-2">
-                  <Link
-                    to={`/ads/${ad._id}/edit`}
-                    className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white py-2 text-xs font-semibold text-slate-700 transition hover:border-violet-300 hover:text-violet-600"
-                  >
-                    <Edit3 size={14} /> Edit
-                  </Link>
+                <div className="flex flex-wrap border-t border-slate-100 bg-slate-50/50 p-2.5 gap-2">
+                  {ad.status === "active" && (
+                    <button
+                      type="button"
+                      onClick={() => handleMarkSold(ad._id, ad.title)}
+                      disabled={markSoldMutation.isPending}
+                      className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 py-2 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 hover:text-sky-800 disabled:opacity-50"
+                      title="Mark ad as sold"
+                    >
+                      <CheckCircle2 size={14} /> Mark Sold
+                    </button>
+                  )}
+
+                  {ad.status !== "sold" && (
+                    <Link
+                      to={`/ads/${ad._id}/edit`}
+                      className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white py-2 text-xs font-semibold text-slate-700 transition hover:border-violet-300 hover:text-violet-600"
+                    >
+                      <Edit3 size={14} /> Edit
+                    </Link>
+                  )}
 
                   <Link
                     to={`/ads/${ad._id}`}

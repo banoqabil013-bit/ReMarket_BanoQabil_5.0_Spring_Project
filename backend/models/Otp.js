@@ -2,10 +2,23 @@ const mongoose = require("mongoose");
 
 const otpSchema = new mongoose.Schema(
   {
+    identifier: {
+      type: String,
+      default: function () {
+        return this.email || this.phone || null;
+      },
+      lowercase: true,
+      trim: true,
+    },
     email: {
       type: String,
-      required: true,
+      default: null,
       lowercase: true,
+      trim: true,
+    },
+    phone: {
+      type: String,
+      default: null,
       trim: true,
     },
     otp: {
@@ -14,7 +27,14 @@ const otpSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ["signup", "login", "reset-password", "google-auth"],
+      enum: [
+        "signup",
+        "login",
+        "reset-password",
+        "google-auth",
+        "phone-signup",
+        "phone-login",
+      ],
       required: true,
     },
     userData: {
@@ -24,15 +44,17 @@ const otpSchema = new mongoose.Schema(
     createdAt: {
       type: Date,
       default: Date.now,
-      expires: 300, // MongoDB TTL: document will automatically expire after 5 minutes (300s)
+      expires: 300, // TTL: expires after 5 minutes
     },
   },
   {
     timestamps: true,
-  },
+  }
 );
 
+otpSchema.index({ identifier: 1, type: 1 });
 otpSchema.index({ email: 1, type: 1 });
+otpSchema.index({ phone: 1, type: 1 });
 
 const Otp = mongoose.model("Otp", otpSchema);
 

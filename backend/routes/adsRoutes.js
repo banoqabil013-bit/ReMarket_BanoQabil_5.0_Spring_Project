@@ -11,6 +11,8 @@ const {
   handleEmailAction,
   updateAd,
   deleteAd,
+  contactSeller,
+  markAsSold,
 } = require("../controller/adsController.js");
 
 const upload = require("../middleware/upload");
@@ -44,11 +46,13 @@ router.get("/my-ads", auth, getMyAds);
 router.post("/", auth, upload.array("images", 5), createAd);
 router.put("/:id", auth, upload.array("images", 5), updateAd);
 router.delete("/:id", auth, deleteAd);
+router.patch("/:id/mark-sold", auth, markAsSold);
 
 // ========================================
-// PUBLIC SINGLE AD
+// PUBLIC SINGLE AD & INQUIRY
 // ========================================
 
 router.get("/:id", getAdById);
+router.post("/:id/contact", contactSeller);
 
 module.exports = router;

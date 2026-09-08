@@ -56,6 +56,19 @@ const adSchema = new mongoose.Schema(
       required: true,
     },
 
+    // Contact phone number for this ad (optional override for seller's profile phone)
+    phone: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    // View counter (incremented on each ad detail page load)
+    views: {
+      type: Number,
+      default: 0,
+    },
+
     // Ad Status
     status: {
       type: String,

@@ -10,6 +10,10 @@ const seedAdmin = require("./seedAdmin");
 const userRoutes = require("./routes/userRoutes.js");
 const categoryRoutes = require("./routes/categoryRoutes.js");
 const adsRoutes = require("./routes/adsRoutes.js");
+const favoritesRoutes = require("./routes/favoritesRoutes.js");
+const chatRoutes = require("./routes/chatRoutes.js");
+const notificationRoutes = require("./routes/notificationRoutes.js");
+
 
 const app = express();
 
@@ -31,6 +35,9 @@ app.get("/", (req, res) => {
 app.use("/users", userRoutes);
 app.use("/category", categoryRoutes);
 app.use("/ads", adsRoutes);
+app.use("/favorites", favoritesRoutes);
+app.use("/chat", chatRoutes);
+app.use("/notifications", notificationRoutes);
 
 const PORT = process.env.PORT || 8080;
 

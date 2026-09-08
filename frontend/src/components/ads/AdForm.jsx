@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Upload, X, Image as ImageIcon, MapPin } from "lucide-react";
+import { Upload, X, Image as ImageIcon, MapPin, Phone } from "lucide-react";
 import { ENDPOINTS } from "../../api/endpoints";
 import useApiMutation from "../../hooks/useApiMutation";
 import useApiQuery from "../../hooks/useApiQuery";
 import { getLiveLocation, getCachedCity } from "../../utils/location";
+import { ALL_PAKISTANI_CITIES } from "../../utils/cities";
 
 const initialState = {
   title: "",
@@ -13,6 +14,7 @@ const initialState = {
   price: "",
   condition: "Used",
   city: "",
+  phone: "",
   status: "active",
 };
 
@@ -95,12 +97,17 @@ const AdForm = ({ ad, isEdit = false }) => {
         price: ad.price || "",
         condition: ad.condition || "Used",
         city: ad.city || "",
+        phone: ad.phone || ad.user?.phone || "",
         status: ad.status || "active",
       });
       if (Array.isArray(ad.images)) {
         setExistingImages(ad.images);
       }
     } else {
+      const user = JSON.parse(localStorage.getItem("user") || "null");
+      if (user?.phone) {
+        setFormData((prev) => (prev.phone ? prev : { ...prev, phone: user.phone }));
+      }
       // For new ads: pre-fill with cached or auto-detected city if empty
       const cached = getCachedCity();
       if (cached) {
@@ -395,6 +402,7 @@ const AdForm = ({ ad, isEdit = false }) => {
             <input
               type="text"
               name="city"
+              list="pakistan-cities"
               value={formData.city}
               onChange={handleChange}
               className={`w-full rounded-xl border px-4 py-3 pr-10 outline-none transition focus:border-indigo-500 ${
@@ -402,6 +410,11 @@ const AdForm = ({ ad, isEdit = false }) => {
               }`}
               placeholder="e.g. Lahore, Karachi, Islamabad"
             />
+            <datalist id="pakistan-cities">
+              {ALL_PAKISTANI_CITIES.map((c) => (
+                <option key={c} value={c} />
+              ))}
+            </datalist>
             <div className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400">
               <MapPin size={16} />
             </div>
@@ -409,6 +422,28 @@ const AdForm = ({ ad, isEdit = false }) => {
           {errors.city && (
             <p className="mt-2 text-sm text-red-600">{errors.city}</p>
           )}
+        </div>
+
+        <div>
+          <label className="mb-2 block text-sm font-medium text-gray-700">
+            Contact Phone / WhatsApp
+          </label>
+          <div className="relative">
+            <input
+              type="tel"
+              name="phone"
+              value={formData.phone}
+              onChange={handleChange}
+              placeholder="e.g. 0334 3171444"
+              className="w-full rounded-xl border border-gray-300 px-4 py-3 pl-10 outline-none transition focus:border-indigo-500"
+            />
+            <div className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400">
+              <Phone size={16} />
+            </div>
+          </div>
+          <p className="mt-1 text-xs text-gray-400">
+            Used by buyers to call you or chat via WhatsApp.
+          </p>
         </div>
 
         <div>

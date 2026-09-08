@@ -1,12 +1,19 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Heart } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { ENDPOINTS } from "../../api/endpoints";
+import { isTokenValid } from "../../utils/auth";
+import api from "../../api/axios";
 
 const placeholderImage =
   "https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&w=900&q=80";
 
-const AdCard = ({ ad }) => {
-  const [isFavorite, setIsFavorite] = useState(false);
+const AdCard = ({ ad, initialFavorited = false }) => {
+  const [isFavorite, setIsFavorite] = useState(initialFavorited);
+  const [optimistic, setOptimistic] = useState(initialFavorited);
+  const queryClient = useQueryClient();
+  const isLoggedIn = isTokenValid();
 
   if (!ad) return null;
 
@@ -14,10 +21,34 @@ const AdCard = ({ ad }) => {
   const categoryName = ad.category?.name || ad.category || "General";
   const status = ad.status || "active";
 
+  const favMutation = useMutation({
+    mutationFn: () => apiClient.post(ENDPOINTS.FAVORITES.TOGGLE(ad._id)),
+    onMutate: () => {
+      // Optimistic toggle
+      setOptimistic((prev) => !prev);
+    },
+    onSuccess: (data) => {
+      const favorited = data?.data?.favorited ?? !isFavorite;
+      setIsFavorite(favorited);
+      setOptimistic(favorited);
+      // Invalidate favorites page cache
+      queryClient.invalidateQueries({ queryKey: ["favorites"] });
+      queryClient.invalidateQueries({ queryKey: ["favorite-ids"] });
+    },
+    onError: () => {
+      // Revert optimistic on error
+      setOptimistic(isFavorite);
+    },
+  });
+
   const toggleFavorite = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsFavorite((prev) => !prev);
+    if (!isLoggedIn) {
+      window.location.href = "/login";
+      return;
+    }
+    favMutation.mutate();
   };
 
   return (
@@ -36,18 +67,28 @@ const AdCard = ({ ad }) => {
         <button
           type="button"
           onClick={toggleFavorite}
-          aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+          aria-label={optimistic ? "Remove from favorites" : "Add to favorites"}
+          title={isLoggedIn ? (optimistic ? "Remove from favorites" : "Save to favorites") : "Login to save"}
           className="absolute left-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 shadow-sm backdrop-blur-sm transition hover:scale-110 hover:bg-white active:scale-95"
         >
           <Heart
             size={16}
             className={`transition-colors ${
-              isFavorite
+              optimistic
                 ? "fill-rose-500 text-rose-500"
                 : "text-slate-600 hover:text-rose-500"
             }`}
           />
         </button>
+
+        {/* SOLD diagonal ribbon */}
+        {status === "sold" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+            <span className="rotate-[-35deg] rounded-lg bg-sky-600 px-8 py-1.5 text-sm font-extrabold uppercase tracking-widest text-white shadow-lg">
+              SOLD
+            </span>
+          </div>
+        )}
 
         <span
           className={`absolute right-3 top-3 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide shadow-sm backdrop-blur-sm ${

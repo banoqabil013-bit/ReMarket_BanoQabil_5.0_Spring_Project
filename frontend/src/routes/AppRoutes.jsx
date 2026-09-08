@@ -13,6 +13,9 @@ import AdDetails from "../pages/ads/AdDetails";
 import CreateAd from "../pages/ads/CreateAd";
 import EditAd from "../pages/ads/EditAd";
 import MyAds from "../pages/ads/MyAds";
+import Favorites from "../pages/Favorites";
+import Messages from "../pages/Messages";
+import SellerProfile from "../pages/SellerProfile";
 import AdminAds from "../pages/admin/AdminAds";
 import AdminUsers from "../pages/admin/AdminUsers";
 
@@ -95,6 +98,7 @@ const AppRoutes = () => {
         {/* ─── Public Ads (browsable without login) ─── */}
         <Route path="/ads" element={<Ads />} />
         <Route path="/ads/:id" element={<AdDetails />} />
+        <Route path="/seller/:id" element={<SellerProfile />} />
 
         {/* ─── Protected Routes ─── */}
         <Route
@@ -102,6 +106,14 @@ const AppRoutes = () => {
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/messages"
+          element={
+            <ProtectedRoute>
+              <Messages />
             </ProtectedRoute>
           }
         />
@@ -134,6 +146,14 @@ const AppRoutes = () => {
           element={
             <ProtectedRoute>
               <MyAds />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/favorites"
+          element={
+            <ProtectedRoute>
+              <Favorites />
             </ProtectedRoute>
           }
         />

@@ -11,18 +11,27 @@ const mongoose = require("mongoose");
 
       email: {
         type: String,
-        required: true,
+        required: false,
         unique: true,
+        sparse: true,
         lowercase: true,
         trim: true,
-        match: [/.+\@.+\..+/, "Please fill a valid email address"],
+        default: null,
+        validate: {
+          validator: function (v) {
+            if (!v) return true;
+            return /.+\@.+\..+/.test(v);
+          },
+          message: "Please fill a valid email address",
+        },
       },
 
       phone: {
         type: String,
         unique: true,
-        sparse: true, // allows multiple null values (Google users may not have a phone)
+        sparse: true, // allows null/sparse for Google or email-only users
         default: null,
+        trim: true,
       },
 
       password: {
@@ -39,7 +48,7 @@ const mongoose = require("mongoose");
 
       authProvider: {
         type: String,
-        enum: ["local", "google"],
+        enum: ["local", "google", "phone"],
         default: "local",
       },
 
@@ -56,7 +65,7 @@ const mongoose = require("mongoose");
 
       city: {
         type: String,
-        required: true,
+        default: "Karachi",
       },
 
       isVerified: {

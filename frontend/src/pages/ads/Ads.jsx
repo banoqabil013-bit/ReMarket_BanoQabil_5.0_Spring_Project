@@ -1,20 +1,30 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { SlidersHorizontal, X, ChevronDown } from "lucide-react";
+import { SlidersHorizontal, X, ChevronDown, ArrowUpDown } from "lucide-react";
 import { ENDPOINTS } from "../../api/endpoints";
 import AdGrid from "../../components/ads/AdGrid";
 import useApiQuery from "../../hooks/useApiQuery";
 import PublicLayout from "../../layouts/PublicLayout";
 
 const CATEGORIES = [
-  "All", "Mobiles", "Vehicles", "Electronics",
-  "Home & Living", "Fashion", "Sports", "Books", "Kids & Baby",
+  "All",
+  "Mobiles",
+  "Vehicles",
+  "Property for Sale",
+  "Property for Rent",
+  "Electronics & Appliances",
+  "Bikes & Motorcycles",
+  "Business & Agriculture",
+  "Services",
+  "Jobs",
+  "Animals & Pets",
+  "Furniture & Decor",
+  "Fashion & Beauty",
+  "Books & Sports",
+  "Kids & Baby",
 ];
 
-const CITIES = [
-  "All Cities", "Karachi", "Lahore", "Islamabad", "Rawalpindi",
-  "Faisalabad", "Multan", "Peshawar", "Quetta", "Sialkot",
-];
+import { POPULAR_CITIES, PROVINCE_CITIES } from "../../utils/cities";
 
 const CONDITIONS = ["All", "New", "Used", "Refurbished"];
 
@@ -28,6 +38,10 @@ const Ads = () => {
   const [activeCategory, setActiveCategory] = useState(catParam);
   const [activeCity,     setActiveCity]     = useState(cityParam);
   const [activeCondition,setActiveCondition]= useState("All");
+  const [minPrice,       setMinPrice]       = useState("");
+  const [maxPrice,       setMaxPrice]       = useState("");
+  const [sortBy,         setSortBy]         = useState("newest");
+  const [displayCount,   setDisplayCount]   = useState(12);
   const [showFilters,    setShowFilters]    = useState(false);
 
   useEffect(() => {
@@ -35,13 +49,30 @@ const Ads = () => {
     setActiveCity(cityParam || "All Cities");
   }, [catParam, cityParam]);
 
+  // Auto-activate category chip when search query exactly matches a category name
+  useEffect(() => {
+    if (qParam) {
+      const matchedCat = CATEGORIES.find(
+        (c) => c !== "All" && c.toLowerCase() === qParam.toLowerCase()
+      );
+      if (matchedCat) {
+        setActiveCategory(matchedCat);
+      }
+    }
+  }, [qParam]);
+
+  // Reset pagination count when filters change
+  useEffect(() => {
+    setDisplayCount(12);
+  }, [activeCategory, activeCity, activeCondition, minPrice, maxPrice, sortBy, qParam]);
+
   const { data, isLoading, isError, error } = useApiQuery(["ads"], ENDPOINTS.ADS.GET_ALL);
   const allAds = data?.ads || data?.data || data || [];
 
   /* Client-side filtering */
   const filtered = allAds.filter((ad) => {
     const matchQ = qParam
-      ? [ad.title, ad.description, ad.city].some((f) =>
+      ? [ad.title, ad.description, ad.city, ad.category?.name].some((f) =>
           (f || "").toLowerCase().includes(qParam.toLowerCase()),
         )
       : true;
@@ -63,32 +94,82 @@ const Ads = () => {
         ? true
         : (ad.condition || "").toLowerCase() === activeCondition.toLowerCase();
 
-    return matchQ && matchCat && matchCity && matchCond;
+    const matchPrice =
+      (!minPrice || Number(ad.price) >= Number(minPrice)) &&
+      (!maxPrice || Number(ad.price) <= Number(maxPrice));
+
+    return matchQ && matchCat && matchCity && matchCond && matchPrice;
   });
+
+  /* Sort */
+  const sorted = [...filtered].sort((a, b) => {
+    if (sortBy === "price_asc") return Number(a.price || 0) - Number(b.price || 0);
+    if (sortBy === "price_desc") return Number(b.price || 0) - Number(a.price || 0);
+    return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+  });
+
+  const displayedAds = sorted.slice(0, displayCount);
+
+  const clearAllFilters = () => {
+    setActiveCategory("All");
+    setActiveCity("All Cities");
+    setActiveCondition("All");
+    setMinPrice("");
+    setMaxPrice("");
+    setSortBy("newest");
+    setDisplayCount(12);
+  };
+
+  const hasActiveFilters =
+    activeCategory !== "All" ||
+    activeCity !== "All Cities" ||
+    activeCondition !== "All" ||
+    minPrice !== "" ||
+    maxPrice !== "" ||
+    sortBy !== "newest";
 
   return (
     <PublicLayout>
       {/* Page header */}
       <div className="border-b border-slate-200 bg-white">
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h1 className="text-2xl font-bold text-slate-800">
                 {qParam ? `Results for "${qParam}"` : "All Listings"}
               </h1>
               <p className="mt-1 text-sm text-slate-500">
-                {filtered.length} ad{filtered.length !== 1 ? "s" : ""} found
+                Showing {displayedAds.length} of {sorted.length} ad{sorted.length !== 1 ? "s" : ""} found
               </p>
             </div>
 
-            {/* Mobile filter toggle */}
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className="flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 sm:hidden"
-            >
-              <SlidersHorizontal size={16} />
-              Filters
-            </button>
+            <div className="flex items-center gap-3">
+              {/* Sort selector */}
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                <ArrowUpDown size={15} className="text-violet-600" />
+                <span className="hidden text-xs font-semibold uppercase tracking-wider text-slate-500 md:inline">
+                  Sort:
+                </span>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="bg-transparent text-xs font-bold text-slate-700 outline-none"
+                >
+                  <option value="newest">Newest First</option>
+                  <option value="price_asc">Price: Low to High</option>
+                  <option value="price_desc">Price: High to Low</option>
+                </select>
+              </div>
+
+              {/* Mobile filter toggle */}
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className="flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 sm:hidden"
+              >
+                <SlidersHorizontal size={16} />
+                Filters
+              </button>
+            </div>
           </div>
 
           {/* Category tabs */}
@@ -99,7 +180,7 @@ const Ads = () => {
                 onClick={() => setActiveCategory(cat)}
                 className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-semibold transition ${
                   activeCategory === cat
-                    ? "bg-violet-600 text-white"
+                    ? "bg-violet-600 text-white shadow-sm"
                     : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                 }`}
               >
@@ -136,13 +217,45 @@ const Ads = () => {
                   <select
                     value={activeCity}
                     onChange={(e) => setActiveCity(e.target.value)}
-                    className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-3 pr-8 text-sm text-slate-700 outline-none"
+                    className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-3 pr-8 text-sm font-semibold text-slate-700 outline-none"
                   >
-                    {CITIES.map((c) => (
-                      <option key={c}>{c}</option>
+                    <option value="All Cities">🇵🇰 All Pakistan (All Cities)</option>
+                    <optgroup label="⭐ Popular Cities">
+                      {POPULAR_CITIES.map((c) => (
+                        <option key={`m-ads-pop-${c}`} value={c}>{c}</option>
+                      ))}
+                    </optgroup>
+                    {Object.entries(PROVINCE_CITIES).map(([province, cities]) => (
+                      <optgroup key={`m-ads-${province}`} label={`📍 ${province}`}>
+                        {cities.map((c) => (
+                          <option key={`m-ads-${province}-${c}`} value={c}>{c}</option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
                   <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                </div>
+              </div>
+
+              {/* Price Range Filter */}
+              <div>
+                <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Price (Rs.)</h3>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    placeholder="Min"
+                    value={minPrice}
+                    onChange={(e) => setMinPrice(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none focus:border-violet-400"
+                  />
+                  <span className="text-slate-400">-</span>
+                  <input
+                    type="number"
+                    placeholder="Max"
+                    value={maxPrice}
+                    onChange={(e) => setMaxPrice(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none focus:border-violet-400"
+                  />
                 </div>
               </div>
 
@@ -167,13 +280,9 @@ const Ads = () => {
               </div>
 
               {/* Reset */}
-              {(activeCategory !== "All" || activeCity !== "All Cities" || activeCondition !== "All") && (
+              {hasActiveFilters && (
                 <button
-                  onClick={() => {
-                    setActiveCategory("All");
-                    setActiveCity("All Cities");
-                    setActiveCondition("All");
-                  }}
+                  onClick={clearAllFilters}
                   className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-red-200 py-2 text-sm font-semibold text-red-500 hover:bg-red-50"
                 >
                   <X size={14} /> Clear All Filters
@@ -194,7 +303,7 @@ const Ads = () => {
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <div className="flex gap-6">
           {/* ─── Sidebar filters (desktop) ─── */}
-          <aside className="hidden w-56 shrink-0 sm:block">
+          <aside className="hidden w-60 shrink-0 sm:block">
             <div className="sticky top-24 space-y-6 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
               {/* City */}
               <div>
@@ -203,11 +312,47 @@ const Ads = () => {
                   <select
                     value={activeCity}
                     onChange={(e) => setActiveCity(e.target.value)}
-                    className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-3 pr-8 text-sm text-slate-700 outline-none focus:border-violet-400"
+                    className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-3 pr-8 text-sm font-semibold text-slate-700 outline-none focus:border-violet-400"
                   >
-                    {CITIES.map((c) => <option key={c}>{c}</option>)}
+                    <option value="All Cities">🇵🇰 All Pakistan (All Cities)</option>
+                    <optgroup label="⭐ Popular Cities">
+                      {POPULAR_CITIES.map((c) => (
+                        <option key={`d-ads-pop-${c}`} value={c}>{c}</option>
+                      ))}
+                    </optgroup>
+                    {Object.entries(PROVINCE_CITIES).map(([province, cities]) => (
+                      <optgroup key={`d-ads-${province}`} label={`📍 ${province}`}>
+                        {cities.map((c) => (
+                          <option key={`d-ads-${province}-${c}`} value={c}>{c}</option>
+                        ))}
+                      </optgroup>
+                    ))}
                   </select>
                   <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                </div>
+              </div>
+
+              {/* Price Range Filter */}
+              <div>
+                <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">Price (PKR)</h3>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      placeholder="Min"
+                      value={minPrice}
+                      onChange={(e) => setMinPrice(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 outline-none focus:border-violet-400 focus:bg-white"
+                    />
+                    <span className="text-xs text-slate-400">to</span>
+                    <input
+                      type="number"
+                      placeholder="Max"
+                      value={maxPrice}
+                      onChange={(e) => setMaxPrice(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 outline-none focus:border-violet-400 focus:bg-white"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -232,22 +377,18 @@ const Ads = () => {
               </div>
 
               {/* Reset */}
-              {(activeCategory !== "All" || activeCity !== "All Cities" || activeCondition !== "All") && (
+              {hasActiveFilters && (
                 <button
-                  onClick={() => {
-                    setActiveCategory("All");
-                    setActiveCity("All Cities");
-                    setActiveCondition("All");
-                  }}
+                  onClick={clearAllFilters}
                   className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-red-200 py-2 text-sm font-semibold text-red-500 hover:bg-red-50"
                 >
-                  <X size={14} /> Clear Filters
+                  <X size={14} /> Clear All Filters
                 </button>
               )}
             </div>
           </aside>
 
-          {/* ─── Ad grid ─── */}
+          {/* ─── Ad grid + Load More ─── */}
           <div className="min-w-0 flex-1">
             {isLoading ? (
               <div className="flex items-center justify-center py-32">
@@ -258,7 +399,22 @@ const Ads = () => {
                 {error?.response?.data?.message || "Failed to load advertisements."}
               </div>
             ) : (
-              <AdGrid ads={filtered} />
+              <>
+                <AdGrid ads={displayedAds} />
+
+                {/* Pagination / Load More */}
+                {displayedAds.length < sorted.length && (
+                  <div className="mt-12 text-center">
+                    <button
+                      type="button"
+                      onClick={() => setDisplayCount((prev) => prev + 12)}
+                      className="inline-flex items-center gap-2 rounded-2xl bg-violet-600 px-8 py-3.5 text-sm font-bold text-white shadow-md transition hover:bg-violet-700 active:scale-95"
+                    >
+                      Load More Listings ({displayedAds.length} of {sorted.length})
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

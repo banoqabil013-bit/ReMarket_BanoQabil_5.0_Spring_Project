@@ -1,5 +1,6 @@
 const Ad = require("../models/Ads.js");
 const User = require("../models/Users.js");
+const Notification = require("../models/Notification.js");
 const { uploadToCloudinary, deleteFromCloudinary } = require("../utils/cloudinaryUpload.js");
 const cloudinary = require("../config/cloudinary.js");
 const { sendEmail } = require("../utils/sendEmail.js");
@@ -98,7 +99,7 @@ const sendAdStatusEmailToUser = async (ad, user, status) => {
 
 const createAd = async (req, res) => {
   try {
-    const { title, description, category, price, condition, city } = req.body;
+    const { title, description, category, price, condition, city, phone } = req.body;
 
     if (!title || !description || !category || !price || !condition || !city) {
       return res.status(400).json({
@@ -136,11 +137,12 @@ const createAd = async (req, res) => {
       condition,
       images,
       city: city.trim(),
+      phone: phone ? phone.trim() : (req.user?.phone || null),
       status: "pending",
     });
 
     const populatedAd = await Ad.findById(ad._id)
-      .populate("user", "name email")
+      .populate("user", "name email phone city createdAt profileImage isVerified")
       .populate("category", "name");
 
     try {
@@ -171,14 +173,24 @@ const createAd = async (req, res) => {
 
 const getAllAds = async (req, res) => {
   try {
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(40, Math.max(1, parseInt(req.query.limit) || 20));
+    const skip  = (page - 1) * limit;
+
+    const total = await Ad.countDocuments({ status: "active" });
     const ads = await Ad.find({ status: "active" })
-      .populate("user", "name email")
+      .populate("user", "name email phone city createdAt profileImage isVerified")
       .populate("category", "name")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
     return res.status(200).json({
       success: true,
       count: ads.length,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
       ads,
     });
   } catch (error) {
@@ -199,35 +211,38 @@ const getAllAds = async (req, res) => {
 const getAdById = async (req, res) => {
   try {
     const ad = await Ad.findById(req.params.id)
-      .populate("user", "name email")
+      .populate("user", "name email phone city createdAt profileImage isVerified")
       .populate("category", "name");
 
     if (!ad) {
-      return res.status(404).json({
-        success: false,
-        message: "Ad not found",
-      });
+      return res.status(404).json({ success: false, message: "Ad not found" });
     }
 
-    if (ad.status !== "active") {
-      return res.status(404).json({
-        success: false,
-        message: "Ad not found",
-      });
+    if (!["active", "sold"].includes(ad.status)) {
+      return res.status(404).json({ success: false, message: "Ad not found" });
     }
 
-    return res.status(200).json({
-      success: true,
-      ad,
-    });
+    // Increment views
+    await Ad.findByIdAndUpdate(req.params.id, { $inc: { views: 1 } });
+
+    // Fetch similar ads (same category, exclude this ad, max 6)
+    let similarAds = [];
+    if (ad.category?._id) {
+      similarAds = await Ad.find({
+        status: "active",
+        category: ad.category._id,
+        _id: { $ne: ad._id },
+      })
+        .populate("user", "name city profileImage isVerified")
+        .populate("category", "name")
+        .sort({ createdAt: -1 })
+        .limit(6);
+    }
+
+    return res.status(200).json({ success: true, ad, similarAds });
   } catch (error) {
     console.error("Get Single Ad Error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch ad",
-      error: error.message,
-    });
+    return res.status(500).json({ success: false, message: "Failed to fetch ad", error: error.message });
   }
 };
 
@@ -238,7 +253,7 @@ const getAdById = async (req, res) => {
 const getMyAds = async (req, res) => {
   try {
     const ads = await Ad.find({ user: req.user._id })
-      .populate("user", "name email")
+      .populate("user", "name email phone city createdAt profileImage isVerified")
       .populate("category", "name")
       .sort({ createdAt: -1 });
 
@@ -307,6 +322,18 @@ const approveAd = async (adId) => {
     console.error("Failed to send approval email to user:", emailError.message);
   }
 
+  try {
+    await Notification.create({
+      recipient: ad.user._id,
+      type: "ad_approved",
+      title: "Ad Approved!",
+      message: `Your ad "${ad.title}" has been approved and is now live.`,
+      link: `/ads/${ad._id}`,
+    });
+  } catch (notifErr) {
+    console.error("Failed to send in-app approval notification:", notifErr.message);
+  }
+
   return ad;
 };
 
@@ -351,6 +378,18 @@ const rejectAd = async (adId) => {
     await sendAdStatusEmailToUser(ad, ad.user, "rejected");
   } catch (emailError) {
     console.error("Failed to send rejection email to user:", emailError.message);
+  }
+
+  try {
+    await Notification.create({
+      recipient: ad.user._id,
+      type: "ad_rejected",
+      title: "Ad Rejected",
+      message: `Your ad "${ad.title}" was rejected. You may edit and resubmit.`,
+      link: `/my-ads`,
+    });
+  } catch (notifErr) {
+    console.error("Failed to send in-app rejection notification:", notifErr.message);
   }
 
   return ad;
@@ -439,7 +478,7 @@ const updateAd = async (req, res) => {
       });
     }
 
-    const { title, description, category, price, condition, city } = req.body;
+    const { title, description, category, price, condition, city, phone } = req.body;
 
     if (title !== undefined) {
       ad.title = title.trim();
@@ -463,6 +502,10 @@ const updateAd = async (req, res) => {
 
     if (city !== undefined) {
       ad.city = city.trim();
+    }
+
+    if (phone !== undefined) {
+      ad.phone = phone ? phone.trim() : null;
     }
 
     if (isOwner && !isAdminUser) {
@@ -612,6 +655,166 @@ const deleteAd = async (req, res) => {
   }
 };
 
+// ========================================
+// CONTACT SELLER (INQUIRY / DIRECT MESSAGE)
+// ========================================
+
+const contactSeller = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, email, phone, message } = req.body;
+
+    if (!message || !message.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a message for the seller.",
+      });
+    }
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Your name is required.",
+      });
+    }
+
+    const ad = await Ad.findById(id).populate("user", "name email phone");
+    if (!ad) {
+      return res.status(404).json({
+        success: false,
+        message: "Ad not found.",
+      });
+    }
+
+    if (ad.status !== "active") {
+      return res.status(400).json({
+        success: false,
+        message: "This ad is no longer active.",
+      });
+    }
+
+    const sellerEmail = ad.user?.email;
+    if (!sellerEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "Seller email address is not available.",
+      });
+    }
+
+    const adUrl = `${FRONTEND_URL}/ads/${ad._id}`;
+    const adThumbnail = ad.images?.[0]?.url || "";
+    const priceFormatted = Number(ad.price || 0).toLocaleString();
+
+    const html = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; background-color: #ffffff;">
+        <div style="background: linear-gradient(135deg, #7c3aed, #4f46e5); padding: 24px; text-align: center; color: #ffffff;">
+          <h1 style="margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.5px;">ReMarket</h1>
+          <p style="margin: 6px 0 0; opacity: 0.9; font-size: 14px;">You have a new buyer inquiry!</p>
+        </div>
+
+        <div style="padding: 24px;">
+          <!-- Ad Mini Card -->
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
+            ${adThumbnail ? `<img src="${adThumbnail}" alt="${ad.title}" style="width: 100%; max-height: 200px; object-fit: cover; border-radius: 8px; margin-bottom: 12px;" />` : ""}
+            <h3 style="margin: 0 0 4px; color: #0f172a; font-size: 18px;">${ad.title}</h3>
+            <p style="margin: 0 0 6px; color: #7c3aed; font-weight: 700; font-size: 18px;">Rs. ${priceFormatted}</p>
+            <p style="margin: 0; color: #64748b; font-size: 13px;">📍 ${ad.city} • Condition: ${ad.condition}</p>
+          </div>
+
+          <!-- Buyer Message -->
+          <div style="background: #f5f3ff; border-left: 4px solid #7c3aed; padding: 16px; border-radius: 4px 12px 12px 4px; margin-bottom: 24px;">
+            <p style="margin: 0 0 8px; font-size: 12px; font-weight: 700; color: #7c3aed; text-transform: uppercase;">Buyer's Message:</p>
+            <p style="margin: 0; font-size: 15px; color: #1e1b4b; line-height: 1.5; white-space: pre-line;">"${message.trim()}"</p>
+          </div>
+
+          <!-- Buyer Contact Details -->
+          <h4 style="margin: 0 0 12px; color: #334155; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;">Buyer Contact Details:</h4>
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 14px;">
+            <tr>
+              <td style="padding: 8px 0; color: #64748b; width: 30%;"><strong>Name:</strong></td>
+              <td style="padding: 8px 0; color: #0f172a;">${name.trim()}</td>
+            </tr>
+            ${phone ? `
+            <tr>
+              <td style="padding: 8px 0; color: #64748b;"><strong>Phone:</strong></td>
+              <td style="padding: 8px 0; color: #0f172a;"><a href="tel:${phone.trim()}" style="color: #7c3aed; font-weight: 600; text-decoration: none;">${phone.trim()}</a></td>
+            </tr>` : ""}
+            ${email ? `
+            <tr>
+              <td style="padding: 8px 0; color: #64748b;"><strong>Email:</strong></td>
+              <td style="padding: 8px 0; color: #0f172a;"><a href="mailto:${email.trim()}" style="color: #7c3aed; font-weight: 600; text-decoration: none;">${email.trim()}</a></td>
+            </tr>` : ""}
+          </table>
+
+          <!-- Action Buttons -->
+          <div style="text-align: center; margin-top: 24px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
+            ${email ? `<a href="mailto:${email.trim()}?subject=Re: Inquiry on ${encodeURIComponent(ad.title)}" style="display: inline-block; background-color: #7c3aed; color: #ffffff; padding: 12px 22px; border-radius: 10px; font-weight: 600; text-decoration: none; margin: 4px;">Reply via Email</a>` : ""}
+            ${phone ? `<a href="https://wa.me/${phone.replace(/[^0-9]/g, '')}" style="display: inline-block; background-color: #25D366; color: #ffffff; padding: 12px 22px; border-radius: 10px; font-weight: 600; text-decoration: none; margin: 4px;">Chat on WhatsApp</a>` : ""}
+            <a href="${adUrl}" style="display: inline-block; background-color: #f1f5f9; color: #475569; padding: 12px 22px; border-radius: 10px; font-weight: 600; text-decoration: none; margin: 4px;">View Your Ad</a>
+          </div>
+        </div>
+
+        <div style="background: #f8fafc; padding: 16px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0;">
+          This message was sent through <a href="${FRONTEND_URL}" style="color: #7c3aed; text-decoration: none;">ReMarket</a>. For your safety, do not share banking passwords or OTP codes with anyone.
+        </div>
+      </div>
+    `;
+
+    try {
+      await sendEmail({
+        to: sellerEmail,
+        subject: `[ReMarket] New inquiry from ${name.trim()} on "${ad.title}"`,
+        html,
+      });
+    } catch (emailError) {
+      console.error("Failed to send inquiry email:", emailError.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Your message has been sent to the seller!",
+    });
+  } catch (error) {
+    console.error("Contact Seller Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send message to seller",
+      error: error.message,
+    });
+  }
+};
+
+// ========================================
+// MARK AS SOLD
+// ========================================
+
+const markAsSold = async (req, res) => {
+  try {
+    const ad = await Ad.findById(req.params.id);
+
+    if (!ad) {
+      return res.status(404).json({ success: false, message: "Ad not found" });
+    }
+
+    // Only the owner can mark as sold
+    if (ad.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: "Not authorized" });
+    }
+
+    if (ad.status === "sold") {
+      return res.status(400).json({ success: false, message: "Ad is already marked as sold" });
+    }
+
+    ad.status = "sold";
+    await ad.save();
+
+    return res.status(200).json({ success: true, message: "Ad marked as sold", ad });
+  } catch (error) {
+    console.error("Mark As Sold Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to update ad status", error: error.message });
+  }
+};
+
 module.exports = {
   createAd,
   getAllAds,
@@ -623,4 +826,7 @@ module.exports = {
   handleEmailAction,
   updateAd,
   deleteAd,
+  contactSeller,
+  markAsSold,
 };
+

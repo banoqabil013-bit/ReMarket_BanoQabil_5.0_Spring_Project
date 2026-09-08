@@ -14,6 +14,12 @@ const {
   updateProfile,
   changePassword,
   deleteAccount,
+  getPublicSellerProfile,
+  sendPhoneSignupOtp,
+  verifyPhoneSignupOtp,
+  sendPhoneLoginOtp,
+  verifyPhoneLoginOtp,
+  resendPhoneOtp,
 } = require("../controller/UserController.js");
 const {
   getAllUsers,
@@ -36,6 +42,15 @@ router.post("/login/verify-otp", verifyLoginOtp);
 router.post("/resend-otp", resendOtp);
 
 // ========================================
+// PHONE AUTH ROUTES (OTP-PROTECTED)
+// ========================================
+router.post("/phone/signup/send-otp", sendPhoneSignupOtp);
+router.post("/phone/signup/verify-otp", verifyPhoneSignupOtp);
+router.post("/phone/login/send-otp", sendPhoneLoginOtp);
+router.post("/phone/login/verify-otp", verifyPhoneLoginOtp);
+router.post("/phone/resend-otp", resendPhoneOtp);
+
+// ========================================
 // PASSWORD RESET ROUTES (OTP-PROTECTED)
 // ========================================
 router.post("/forgot-password", forgotPassword);
@@ -51,6 +66,7 @@ router.post("/google-auth/verify-otp", verifyGoogleOtp);
 // ========================================
 // USER PROFILE & ACCOUNT
 // ========================================
+router.get("/seller/:id", getPublicSellerProfile);
 router.get("/profile", auth, getProfile);
 router.put("/profile", auth, updateProfile);
 router.put("/change-password", auth, changePassword);

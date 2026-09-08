@@ -6,6 +6,8 @@ const { OAuth2Client } = require("google-auth-library");
 const generateToken = require("../utils/generateToken.js");
 const { sendEmail } = require("../utils/sendEmail.js");
 const { getOtpEmailTemplate } = require("../utils/otpEmailTemplate.js");
+const { normalizePakistaniPhone, isValidPakistaniPhone } = require("../utils/phoneHelper.js");
+const { sendSms } = require("../utils/sendSms.js");
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -59,7 +61,9 @@ const sendSignupOtp = async (req, res) => {
 
     // Store pending user registration data with the OTP (expires in 5 minutes via TTL)
     await Otp.create({
+      identifier: normalizedEmail,
       email: normalizedEmail,
+      phone: normalizedPhone,
       otp,
       type: "signup",
       userData: {
@@ -216,6 +220,7 @@ const login = async (req, res) => {
 
     // Store OTP in database (valid for 5 minutes)
     await Otp.create({
+      identifier: normalizedEmail,
       email: normalizedEmail,
       otp,
       type: "login",
@@ -349,6 +354,7 @@ const resendOtp = async (req, res) => {
 
       await Otp.deleteMany({ email: normalizedEmail, type: "signup" });
       await Otp.create({
+        identifier: normalizedEmail,
         email: normalizedEmail,
         otp,
         type: "signup",
@@ -376,6 +382,7 @@ const resendOtp = async (req, res) => {
 
       await Otp.deleteMany({ email: normalizedEmail, type: "reset-password" });
       await Otp.create({
+        identifier: normalizedEmail,
         email: normalizedEmail,
         otp,
         type: "reset-password",
@@ -397,6 +404,7 @@ const resendOtp = async (req, res) => {
 
       await Otp.deleteMany({ email: normalizedEmail, type: "login" });
       await Otp.create({
+        identifier: normalizedEmail,
         email: normalizedEmail,
         otp,
         type: "login",
@@ -456,6 +464,7 @@ const forgotPassword = async (req, res) => {
 
     // Store in Otp collection (expires in 5 minutes via TTL)
     await Otp.create({
+      identifier: normalizedEmail,
       email: normalizedEmail,
       otp,
       type: "reset-password",
@@ -666,7 +675,7 @@ const googleAuth = async (req, res) => {
     // Generate and store OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     await Otp.deleteMany({ email: normalizedEmail, type: "google-auth" });
-    await Otp.create({ email: normalizedEmail, otp, type: "google-auth" });
+    await Otp.create({ identifier: normalizedEmail, email: normalizedEmail, otp, type: "google-auth" });
 
     // Send OTP email
     const html = getOtpEmailTemplate(otp, "google-auth", user.name);
@@ -792,11 +801,443 @@ const changePassword = async (req, res) => {
 };
 
 const deleteAccount = async (req, res) => {
-  await User.findByIdAndDelete(req.user._id);
+  try {
+    const userId = req.user._id;
+    const user = await User.findById(userId);
 
-  res.json({
-    message: "Account deleted successfully",
-  });
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const Ad = require("../models/Ads.js");
+    const Favorite = require("../models/Favorite.js");
+    const Notification = require("../models/Notification.js");
+    const Conversation = require("../models/Conversation.js");
+    const Message = require("../models/Message.js");
+    const { deleteFromCloudinary } = require("../utils/cloudinaryUpload.js");
+
+    // 1. Fetch all ads posted by this user
+    const userAds = await Ad.find({ user: userId });
+    const adIds = userAds.map((ad) => ad._id);
+
+    // 2. Clean up Cloudinary images for all their ads
+    for (const ad of userAds) {
+      if (ad.images && Array.isArray(ad.images)) {
+        for (const img of ad.images) {
+          try {
+            await deleteFromCloudinary(img);
+          } catch (err) {
+            console.error(`Failed to delete ad image from Cloudinary:`, err.message);
+          }
+        }
+      }
+    }
+
+    // 3. Delete all ads posted by this user
+    const deletedAdsResult = await Ad.deleteMany({ user: userId });
+
+    // 4. Delete favorites (favorites saved by user OR favorites on user's ads)
+    await Favorite.deleteMany({
+      $or: [{ user: userId }, { ad: { $in: adIds } }],
+    });
+
+    // 5. Delete conversations & messages related to this user or their ads
+    await Conversation.deleteMany({
+      $or: [{ buyer: userId }, { seller: userId }, { ad: { $in: adIds } }],
+    });
+    await Message.deleteMany({ sender: userId });
+
+    // 6. Delete in-app notifications
+    await Notification.deleteMany({ recipient: userId });
+
+    // 7. Delete OTP records
+    await Otp.deleteMany({
+      $or: [
+        { email: user.email },
+        { identifier: user.email },
+        ...(user.phone ? [{ phone: user.phone }, { identifier: user.phone }] : []),
+      ],
+    });
+
+    // 8. Delete the user document
+    await User.findByIdAndDelete(userId);
+
+    return res.status(200).json({
+      success: true,
+      message: `Account and ${deletedAdsResult.deletedCount} posted ad(s) deleted successfully`,
+    });
+  } catch (error) {
+    console.error("Delete Account Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete account",
+      error: error.message,
+    });
+  }
+};
+
+// ========================================
+// PUBLIC SELLER PROFILE
+// ========================================
+const getPublicSellerProfile = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findById(id).select("name email phone city profileImage isVerified createdAt");
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "Seller profile not found" });
+    }
+
+    const Ad = require("../models/Ads.js");
+    const ads = await Ad.find({ user: id, status: "active" })
+      .populate("category", "name")
+      .sort({ createdAt: -1 });
+
+    const totalSold = await Ad.countDocuments({ user: id, status: "sold" });
+
+    return res.status(200).json({
+      success: true,
+      seller: {
+        _id: user._id,
+        name: user.name,
+        city: user.city,
+        phone: user.phone,
+        profileImage: user.profileImage,
+        isVerified: user.isVerified,
+        createdAt: user.createdAt,
+        totalAds: ads.length,
+        totalSold,
+      },
+      ads,
+    });
+  } catch (error) {
+    console.error("Get Seller Profile Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch seller profile",
+      error: error.message,
+    });
+  }
+};
+
+// ========================================
+// PHONE AUTH: SIGNUP SEND OTP
+// ========================================
+const sendPhoneSignupOtp = async (req, res) => {
+  try {
+    const { name, phone, city, password } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: "Name is required" });
+    }
+
+    const normalizedPhone = normalizePakistaniPhone(phone);
+    if (!normalizedPhone) {
+      return res.status(400).json({
+        message: "Please enter a valid Pakistani mobile number (e.g. 0300 1234567 or +923001234567)",
+      });
+    }
+
+    const phoneExists = await User.findOne({ phone: normalizedPhone });
+    if (phoneExists) {
+      return res.status(400).json({
+        message: "An account with this phone number already exists. Please log in instead.",
+      });
+    }
+
+    let hashedPassword = null;
+    if (password && String(password).length >= 6) {
+      hashedPassword = await bcrypt.hash(password, 10);
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Clear previous phone-signup OTPs
+    await Otp.deleteMany({ identifier: normalizedPhone, type: "phone-signup" });
+
+    await Otp.create({
+      identifier: normalizedPhone,
+      phone: normalizedPhone,
+      otp,
+      type: "phone-signup",
+      userData: {
+        name: String(name).trim(),
+        phone: normalizedPhone,
+        city: city ? String(city).trim() : "Karachi",
+        password: hashedPassword,
+        authProvider: "phone",
+        role: "user",
+      },
+    });
+
+    await sendSms({
+      to: normalizedPhone,
+      otp,
+      message: `Your ReMarket phone verification code is ${otp}. Valid for 5 minutes.`,
+    });
+
+    return res.status(200).json({
+      success: true,
+      requireOtp: true,
+      phone: normalizedPhone,
+      message: `A 6-digit verification code has been sent to ${normalizedPhone}`,
+    });
+  } catch (error) {
+    console.error("sendPhoneSignupOtp error:", error);
+    return res.status(500).json({
+      message: error.message || "Failed to send phone verification code",
+    });
+  }
+};
+
+// ========================================
+// PHONE AUTH: SIGNUP VERIFY OTP & CREATE USER
+// ========================================
+const verifyPhoneSignupOtp = async (req, res) => {
+  try {
+    const { phone, otp } = req.body;
+    const normalizedPhone = normalizePakistaniPhone(phone);
+    const submittedOtp = String(otp || "").trim();
+
+    if (!normalizedPhone || !submittedOtp) {
+      return res.status(400).json({
+        message: "Phone number and verification code are required",
+      });
+    }
+
+    const otpRecord = await Otp.findOne({
+      identifier: normalizedPhone,
+      type: "phone-signup",
+    });
+
+    if (!otpRecord) {
+      return res.status(400).json({
+        message: "Verification code expired or not found. Please request a new code.",
+      });
+    }
+
+    if (otpRecord.otp !== submittedOtp) {
+      return res.status(400).json({
+        message: "Incorrect verification code. Please try again.",
+      });
+    }
+
+    // Check duplicate
+    const alreadyRegistered = await User.findOne({ phone: normalizedPhone });
+    if (alreadyRegistered) {
+      await Otp.deleteMany({ identifier: normalizedPhone, type: "phone-signup" });
+      return res.status(400).json({
+        message: "Account already exists with this phone number. Please log in.",
+      });
+    }
+
+    const user = await User.create({
+      ...otpRecord.userData,
+      isVerified: true,
+    });
+
+    await Otp.deleteMany({ identifier: normalizedPhone, type: "phone-signup" });
+
+    const token = generateToken(user._id);
+
+    return res.status(201).json({
+      success: true,
+      message: "Account created and verified successfully via phone!",
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        city: user.city,
+        role: user.role,
+        authProvider: user.authProvider,
+      },
+    });
+  } catch (error) {
+    console.error("verifyPhoneSignupOtp error:", error);
+    return res.status(500).json({
+      message: error.message || "Phone verification failed",
+    });
+  }
+};
+
+// ========================================
+// PHONE AUTH: LOGIN SEND OTP
+// ========================================
+const sendPhoneLoginOtp = async (req, res) => {
+  try {
+    const { phone } = req.body;
+    const normalizedPhone = normalizePakistaniPhone(phone);
+
+    if (!normalizedPhone) {
+      return res.status(400).json({
+        message: "Please enter a valid Pakistani mobile number (e.g. 0300 1234567)",
+      });
+    }
+
+    const user = await User.findOne({ phone: normalizedPhone });
+    if (!user) {
+      return res.status(404).json({
+        message: "No account found with this phone number. Please sign up first.",
+      });
+    }
+
+    if (user.isBlocked) {
+      return res.status(403).json({
+        message: "Your account has been suspended. Please contact support.",
+      });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    await Otp.deleteMany({ identifier: normalizedPhone, type: "phone-login" });
+
+    await Otp.create({
+      identifier: normalizedPhone,
+      phone: normalizedPhone,
+      otp,
+      type: "phone-login",
+    });
+
+    await sendSms({
+      to: normalizedPhone,
+      otp,
+      message: `Your ReMarket login code is ${otp}. Valid for 5 minutes.`,
+    });
+
+    return res.status(200).json({
+      success: true,
+      requireOtp: true,
+      phone: normalizedPhone,
+      message: `A 6-digit login code has been sent to ${normalizedPhone}`,
+    });
+  } catch (error) {
+    console.error("sendPhoneLoginOtp error:", error);
+    return res.status(500).json({
+      message: error.message || "Failed to send login code",
+    });
+  }
+};
+
+// ========================================
+// PHONE AUTH: LOGIN VERIFY OTP
+// ========================================
+const verifyPhoneLoginOtp = async (req, res) => {
+  try {
+    const { phone, otp } = req.body;
+    const normalizedPhone = normalizePakistaniPhone(phone);
+    const submittedOtp = String(otp || "").trim();
+
+    if (!normalizedPhone || !submittedOtp) {
+      return res.status(400).json({
+        message: "Phone number and verification code are required",
+      });
+    }
+
+    const otpRecord = await Otp.findOne({
+      identifier: normalizedPhone,
+      type: "phone-login",
+    });
+
+    if (!otpRecord) {
+      return res.status(400).json({
+        message: "Verification code expired or not found. Please request a new code.",
+      });
+    }
+
+    if (otpRecord.otp !== submittedOtp) {
+      return res.status(400).json({
+        message: "Incorrect verification code. Please try again.",
+      });
+    }
+
+    const user = await User.findOne({ phone: normalizedPhone });
+    if (!user) {
+      return res.status(404).json({
+        message: "User account not found",
+      });
+    }
+
+    if (user.isBlocked) {
+      return res.status(403).json({
+        message: "Your account has been suspended. Please contact support.",
+      });
+    }
+
+    await Otp.deleteMany({ identifier: normalizedPhone, type: "phone-login" });
+
+    const token = generateToken(user._id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Logged in successfully!",
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        city: user.city,
+        role: user.role,
+        authProvider: user.authProvider,
+      },
+    });
+  } catch (error) {
+    console.error("verifyPhoneLoginOtp error:", error);
+    return res.status(500).json({
+      message: error.message || "Phone login verification failed",
+    });
+  }
+};
+
+// ========================================
+// PHONE AUTH: RESEND OTP
+// ========================================
+const resendPhoneOtp = async (req, res) => {
+  try {
+    const { phone, type } = req.body;
+    const normalizedPhone = normalizePakistaniPhone(phone);
+    const validTypes = ["phone-signup", "phone-login"];
+
+    if (!normalizedPhone || !validTypes.includes(type)) {
+      return res.status(400).json({
+        message: "Valid phone number and OTP type are required",
+      });
+    }
+
+    const existingOtp = await Otp.findOne({
+      identifier: normalizedPhone,
+      type,
+    });
+
+    if (!existingOtp) {
+      return res.status(400).json({
+        message: "No pending verification session found. Please start over.",
+      });
+    }
+
+    const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
+    existingOtp.otp = newOtp;
+    existingOtp.createdAt = new Date();
+    await existingOtp.save();
+
+    await sendSms({
+      to: normalizedPhone,
+      otp: newOtp,
+      message: `Your new ReMarket code is ${newOtp}. Valid for 5 minutes.`,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `A new verification code has been dispatched to ${normalizedPhone}`,
+    });
+  } catch (error) {
+    console.error("resendPhoneOtp error:", error);
+    return res.status(500).json({
+      message: error.message || "Failed to resend verification code",
+    });
+  }
 };
 
 module.exports = {
@@ -814,6 +1255,12 @@ module.exports = {
   updateProfile,
   changePassword,
   deleteAccount,
+  getPublicSellerProfile,
+  sendPhoneSignupOtp,
+  verifyPhoneSignupOtp,
+  sendPhoneLoginOtp,
+  verifyPhoneLoginOtp,
+  resendPhoneOtp,
   // Alias for backward compatibility:
   signup: sendSignupOtp,
 };
