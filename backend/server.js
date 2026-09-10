@@ -19,7 +19,7 @@ const app = express();
 
 app.use(
   cors({
-    origin: 'http://localhost:5173',
+    origin: 'http://localhost:5173','https://re-market-bano-qabil-5-0-spring-pro.vercel.app'
     credentials: true,
   }),
 );
