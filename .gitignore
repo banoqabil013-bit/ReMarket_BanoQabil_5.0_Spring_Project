@@ -1,8 +1,23 @@
-﻿.env
+﻿# Environment variables
+.env
 .env.*
 *.env
-backend/.env
-frontend/.env
-node_modules
-dist
-.whatsapp-session
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+frontend/dist/
+backend/dist/
+
+# WhatsApp session
+.whatsapp-session/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
